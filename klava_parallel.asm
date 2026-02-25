@@ -3,10 +3,10 @@
 org 100h
 
 Start:      mov ax, 3509h
-            int 21h
+            int 21h         ; ES:BX = address of the old interrupt handler
             mov Old09Ofs, bx
             mov bx, es
-            mov Old09Seg, bx
+            mov Old09Seg, bx    ; save old interrupt handler segment and offset to variables
 
             push 0
             pop es      ; ES -> interrupt vector table
@@ -17,7 +17,7 @@ Start:      mov ax, 3509h
 
             mov ax, cs
             mov es:[bx+2], ax       ; input code segment to segment of 09h interrupt vector table
-            sti         ; enable maskable hardware interrupts
+            sti         ; enable maskable hardware interrupts, now the new handler is working
 
             mov dx, offset EndOfProgram
             shr dx, 4
@@ -44,14 +44,14 @@ New09       proc
 
             and al, not 80h
             out 61h, al     ; input 0 to leftmost bit of 61h
-
+                            ; signal that the interrupt has been processed
             mov al, 20h
             out 20h, al     ; input code 20h to interrupt controller
-
+                            ; end of interrupt
             pop es bx ax
             db 0eah
             Old09Seg dw 0
-            Old09Ofs dw 0
+            Old09Ofs dw 0   ; return to old interrupt handler
             endp
 
 EndOfProgram:
