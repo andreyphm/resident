@@ -59,10 +59,14 @@ NewHandler          proc
 
                     ret
                     endp
-;----------------------------------------------------------------------
 
+;----------------------------------------------------------------------
+;It's new 09h handler. Output frame with all registers when \ is pressed (43 scan-code). Then returns to old handler.
+;Arguments: -
+;Return value: -
+;----------------------------------------------------------------------
 New09       proc
-            push ax bx cx dx si di bp ds es
+            push sp ax bx cx dx si di bp ds es
             mov bp, sp                  ; now bp -> Stack
 
             push 0b800h
@@ -76,7 +80,7 @@ New09       proc
 SkipJump:   xor bx, bx
             call WriteFrame
 
-            mov bx, 160 * 4 + 30
+            mov bx, 160 * 5 + 30
             mov es: byte ptr[bx], 'E'
             mov es: byte ptr[bx+1], 1bh
             add bx, 2
@@ -86,7 +90,7 @@ SkipJump:   xor bx, bx
             mov ax, [bp + 0]
             call HexOutput
 
-            mov bx, 160 * 5 + 30
+            mov bx, 160 * 4 + 30
             mov es: byte ptr[bx], 'D'
             mov es: byte ptr[bx+1], 1bh
             add bx, 2
@@ -96,7 +100,7 @@ SkipJump:   xor bx, bx
             mov ax, [bp + 2]
             call HexOutput
 
-            mov bx, 160 * 2 + 30
+            mov bx, 160 * 1 + 30
             mov es: byte ptr[bx], 'B'
             mov es: byte ptr[bx+1], 1bh
             add bx, 2
@@ -166,6 +170,17 @@ SkipJump:   xor bx, bx
             mov ax, [bp + 16]
             call HexOutput
 
+             mov bx, 160 * 2 + 30
+            mov es: byte ptr[bx], 'S'
+            mov es: byte ptr[bx+1], 1bh
+            add bx, 2
+            mov es: byte ptr[bx], 'P'
+            mov es: byte ptr[bx+1], 1bh
+            add bx, 4
+            mov ax, [bp + 18]
+            add ax, 6
+            call HexOutput
+
             mov bx, 160 * 9 + 30
             mov es: byte ptr[bx], 'I'
             mov es: byte ptr[bx+1], 1bh
@@ -173,7 +188,7 @@ SkipJump:   xor bx, bx
             mov es: byte ptr[bx], 'P'
             mov es: byte ptr[bx+1], 1bh
             add bx, 4
-            mov ax, [bp + 18]
+            mov ax, [bp + 20]
             call HexOutput
 
             mov bx, 160 * 7 + 30
@@ -183,7 +198,7 @@ SkipJump:   xor bx, bx
             mov es: byte ptr[bx], 'S'
             mov es: byte ptr[bx+1], 1bh
             add bx, 4
-            mov ax, [bp + 20]
+            mov ax, [bp + 22]
             call HexOutput
 
             mov bx, 160 * 6 + 30
@@ -196,16 +211,6 @@ SkipJump:   xor bx, bx
             mov ax, ss
             call HexOutput
 
-            mov bx, 160 * 1 + 30
-            mov es: byte ptr[bx], 'S'
-            mov es: byte ptr[bx+1], 1bh
-            add bx, 2
-            mov es: byte ptr[bx], 'P'
-            mov es: byte ptr[bx+1], 1bh
-            add bx, 4
-            mov ax, sp
-            call HexOutput
-
 Next:       or al, 80h
             out 61h, al                 ; input 1 to leftmost bit of 61h
 
@@ -215,7 +220,7 @@ Next:       or al, 80h
             mov al, 20h
             out 20h, al                 ; input code 20h to interrupt controller
                                         ; end of interrupt
-            pop es ds bp di si dx cx bx ax
+            pop es ds bp di si dx cx bx ax sp
             db 0eah
             Old09Ofs dw 0
             Old09Seg dw 0               ; return to old interrupt handler
