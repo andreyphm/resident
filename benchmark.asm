@@ -26,7 +26,10 @@ Main        proc
             mov sp, 0008h
             sti
 
-InfLoop:    jmp InfLoop
+InfLoop:    nop
+            nop
+            nop
+            jmp InfLoop
 
             ret
             endp

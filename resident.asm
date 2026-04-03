@@ -3,8 +3,42 @@
 org 100h
 
 ;----------------------------------------------------------------------
-; Output 2-letter register name at ES:[BX], then output AX as hex
-; BX -> screen position in video memory
+; Save old int_num interrupt handler address to old_ofs and old_seg variables
+; Arguments: -
+; Return value: old_ofs = old handler offset, old_seg = old handler segment
+; Destroy: AX, BX, ES
+;----------------------------------------------------------------------
+SAVE_OLD_INT   macro int_num, old_ofs, old_seg
+               mov ax, 3500h + int_num
+               int 21h
+
+               mov old_ofs, bx
+               mov bx, es
+               mov old_seg, bx
+               endm
+
+;----------------------------------------------------------------------
+; Write the address of new int_num handler to the interrupt vector table
+; Arguments: ES = interrupt vector table address
+; Return value: offset of int_num = offset new_handler, segment of int_num = CS
+; Destroy: AX, BX
+;----------------------------------------------------------------------
+SET_NEW_INT    macro int_num, new_handler
+               cli
+               push 0
+               pop es
+
+               mov bx, int_num * 4
+               mov es:[bx], offset new_handler
+               mov ax, cs
+               mov es:[bx+2], ax
+               sti
+               endm
+
+;----------------------------------------------------------------------
+; Output 2-letter register name at ES:[BX]
+; Arguments: ch1 = first reg name character, ch2 = second reg name character, ES = 0b800h
+; Return value: BX -> screen position in video memory
 ;----------------------------------------------------------------------
 PUT_NAME    macro ch1, ch2
             mov es:byte ptr [bx], ch1   
@@ -16,10 +50,12 @@ PUT_NAME    macro ch1, ch2
             endm
 
 ;----------------------------------------------------------------------
-; Output register from memory/immediate source through AX
-; row, col = screen position
-; ch1, ch2 = register name letters
-; value = value loaded into AX
+; Output register value on screen.
+; Arguments:    row, col = screen position
+;               ch1, ch2 = register name letters
+;               value = value loaded into AX
+; Return value: -
+; Destroy: BX, DX
 ;----------------------------------------------------------------------
 PUT_REG     macro row, col, ch1, ch2, value
             mov bx, 160 * row + col
@@ -30,6 +66,10 @@ PUT_REG     macro row, col, ch1, ch2, value
 
 ;----------------------------------------------------------------------
 ; Output register name, assuming AX already contains the value
+; Arguments:    row, col = screen position
+;               ch1, ch2 = register name letters
+; Return value: -
+; Destroy: BX, DX
 ;----------------------------------------------------------------------
 PUT_REG_AX  macro row, col, ch1, ch2
             mov bx, 160 * row + col
@@ -46,11 +86,10 @@ Start:      call Main
 ;----------------------------------------------------------------------
 Main        proc
 
-            call SaveOldHandler
-
-            push 0
-            pop es              ; ES -> interrupt vector table
-            call NewHandler
+            SAVE_OLD_INT 08h, Old08Ofs, Old08Seg
+            SAVE_OLD_INT 09h, Old09Ofs, Old09Seg
+            SET_NEW_INT  08h, New08
+            SET_NEW_INT  09h, New09
 
             mov dx, offset EndOfProgram
             shr dx, 4
@@ -60,60 +99,22 @@ Main        proc
             endp
 
 ;----------------------------------------------------------------------
-; Save old interrupt handler address to Old09Ofs and Old09Seg variables
-; Arguments: -
-; Return value: Old090fs = old handler offset, Old09Seg = old handler segment
-; Destroy: AX, BX, ES
-;----------------------------------------------------------------------
-SaveOldHandler      proc
-
-                    mov ax, 3509h
-                    int 21h             ; ES:BX = address of the old interrupt handler
-
-                    mov Old09Ofs, bx
-                    mov bx, es
-                    mov Old09Seg, bx    ; save old interrupt handler segment and offset to variables
-
-                    ret
-                    endp
-
-;----------------------------------------------------------------------
-; Write the address of new handler to the interrupt vector table
-; Arguments: ES = interrupt vector table address
-; Return value: offset of 09h = offset New09, segment of 09h = CS
-; Destroy: AX, BX
-;----------------------------------------------------------------------
-NewHandler          proc
-
-                    cli                         ; disable maskable hardware interrupts
-                    mov bx, 09h * 4             ; input offset of interrupt vector table for keyboard to BX
-                    mov es:[bx], offset New09   ; input func offset to offset of 09h interrupt vector table
-
-                    mov ax, cs
-                    mov es:[bx+2], ax           ; input code segment to segment of 09h interrupt vector table
-                    sti                         ; enable maskable hardware interrupts, now the new handler is working
-
-                    ret
-                    endp
-
-;----------------------------------------------------------------------
-; It's new 09h handler. Output frame with all registers when \ is pressed (43 scan-code). Then returns to old handler.
+; It's new 08h handler. If ShowFlag == 1, redraw frame with registers.
 ; Arguments: -
 ; Return value: -
 ;----------------------------------------------------------------------
-New09       proc
+New08       proc
             push sp ax bx cx dx si di bp ds es
-            mov bp, sp                  ; now bp -> Stack
 
+            cmp ShowFlag, 1
+            je DrawRegs
+            jmp SkipDraw
+
+DrawRegs:   mov bp, sp                  ; now bp -> Stack
             push 0b800h
             pop es                      ; ES -> video memory
 
-            in al, 60h                  ; input to AL from 60h port
-            cmp al, 43
-            je SkipJump
-            jmp Next
-
-SkipJump:   xor bx, bx
+            xor bx, bx
             call WriteFrame
 
             PUT_REG 5, 30, 'E', 'S', <[bp + 0]>
@@ -137,20 +138,36 @@ SkipJump:   xor bx, bx
             mov ax, ss
             PUT_REG_AX 6, 30, 'S', 'S'
 
-Next:       or al, 80h
-            out 61h, al                 ; input 1 to leftmost bit of 61h
-
-            and al, not 80h
-            out 61h, al                 ; input 0 to leftmost bit of 61h
-                                        ; signal that the interrupt has been processed
-            mov al, 20h
-            out 20h, al                 ; input code 20h to interrupt controller
-                                        ; end of interrupt
-            pop es ds bp di si dx cx bx ax sp
+SkipDraw:   pop es ds bp di si dx cx bx ax sp
             db 0eah
-            Old09Ofs dw 0
-            Old09Seg dw 0               ; return to old interrupt handler
+            Old08Ofs dw 0
+            Old08Seg dw 0
             endp
+
+;----------------------------------------------------------------------
+; It's new 09h handler. Set ShowFlag to 1 if \ is pressed.
+; Arguments: -
+; Return value: -
+;----------------------------------------------------------------------
+New09               proc
+                    push ax
+
+                    in al, 60h
+                    cmp al, 43          ; cmp al with \ code
+                    jne PassToOld09
+                    xor ShowFlag, 1
+
+PassToOld09:        or al, 80h
+                    out 61h, al         ; input 1 to leftmost bit of 61h
+                    and al, not 80h
+                    out 61h, al         ; input 0 to leftmost bit of 61h, signal that the interrupt has been processed
+                    mov al, 20h
+                    out 20h, al         ; input code 20h to interrupt controller
+                    pop ax
+                    db 0eah
+                    Old09Ofs dw 0
+                    Old09Seg dw 0
+                    endp
 
 ;-------------------------------------------------------------------
 ; Converts value 0..F in AL to hex ASCII symbol and outputs it
@@ -311,6 +328,9 @@ BottomLine:             mov es: byte ptr[bx], 0cdh
 
 		                ret
 		                endp
+
+;-------------------------------------------------------------------------------------------
+ShowFlag db 0
 
 EndOfProgram:
 end         Start
